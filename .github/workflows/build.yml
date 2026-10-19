@@ -1,0 +1,51 @@
+name: build-apk
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build debug APK
+        run: |
+          set +e
+          gradle --version > gv.log 2>&1
+          gradle assembleDebug --no-daemon > build.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            echo "::error title=gradle-version::$(head -n 5 gv.log | tr '\n' ' ' | head -c 300)"
+            echo "::error title=what-went-wrong::$(sed -n '/What went wrong/,/Try:/p' build.log | tr '\n' ' ' | head -c 800)"
+            echo "::error title=error-lines::$(grep -E -m 10 '^(e: |FAILURE:|Caused by:|error:)' build.log | tr '\n' ' ' | head -c 800)"
+            echo "::error title=tail::$(tail -n 20 build.log | tr '\n' ' ' | head -c 800)"
+          fi
+          exit $code
+      - name: Collect APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk NetGateNoRoot-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NetGateNoRoot-debug
+          path: NetGateNoRoot-debug.apk
+      - name: Publish APK to apk branch
+        run: |
+          git config user.name "netgate-bot"
+          git config user.email "netgate-bot@users.noreply.github.com"
+          git checkout -B apk
+          git add -f NetGateNoRoot-debug.apk
+          git commit -m "build: NetGateNoRoot-debug"
+          git push -f origin apk
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "b${{ github.run_number }}" NetGateNoRoot-debug.apk --title "NetGateNoRoot debug" --notes "CI build"
